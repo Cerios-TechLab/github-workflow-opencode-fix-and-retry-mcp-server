@@ -1754,20 +1754,72 @@ git push git@github.com:Cerios-TechLab/github-workflow-opencode-fix-and-retry-mc
 - Test: `tests/test_mcp.py`
 
 **Interfaces:**
-- Consumes: `Service`, `Database`, `Config`, `GitHubAPI`.
-- Produces: `create_mcp(service: Service, cfg: Config) -> FastMCP`; tools:
-  - `list_chains(state: str | None = None) -> list[dict]` (id, workflow_path, head_branch, attempt, state, next_retry_at, issue_url)
-  - `get_chain(chain_id: int) -> dict`
-  - `retry_now(chain_id: int) -> dict` (activeert `next_retry_at = now`)
-  - `pause_chain(chain_id: int) -> dict`
-  - `resume_chain(chain_id: int) -> dict` (behoudt oude `next_retry_at`)
-  - `create_issue_now(chain_id: int) -> dict` (maakt issue + logt event `issue_manual`)
-  - `set_config(key: str, value: str) -> dict` (overrides: `gh_oc_auto`, `retry_delays_min`)
-  - `health() -> dict` (db-path, scheduler-tick, laatste event-tijd, aantal ketens per state)
+- `create_mcp(db, cfg) -> FastMCP`: maakt eigen `Database`-wrapper rond `db`, geen service nodig — tools werken direct op db + cfg.
+- **Tools:**
+  - `list_chains(state: str | None = None) -> list[dict]`: elk dict = `{id, workflow_path, workflow_name, head_branch, attempt, state, next_retry_at, issue_url, last_error}`. `state` filtert optioneel.
+  - `get_chain(chain_id: int) -> dict`: enkele keten of `{"error": "not_found"}`.
+  - `retry_now(chain_id: int) -> dict`: `next_retry_at = utcnow_iso()`, update, return `{"ok": True}`.
+  - `pause_chain(chain_id: int) -> dict`: `state = "paused"` (alleen als `state in (running, waiting, fix_error)`; anders `{"ok": False, "reason": "..."}`).
+  - `resume_chain(chain_id: int) -> dict`: `state = "running"` (alleen als `state == "paused"`; anders `{"ok": False, "reason": "..."}`).
+  - `create_issue_now(chain_id: int) -> dict`: `await service._maybe_create_issue(chain)` via `Service`-instantie die `create_mcp` aanmaakt (dus wel een service nodig). Return `{"ok": True, "issue_url": ...}`.
+  - `set_config(key: str, value: str) -> dict`: overschrijf `db.set_override()` — alleen sleutels `gh_oc_auto` (bool) en `retry_delays_min` (comma-gescheiden integers). Anders `{"ok": False, "reason": "invalid_key"}`.
+  - `health() -> dict`: `{ok: True, db: str(path), tick: cfg.scheduler_tick_s, latest_event: ..., chains: {<state>: <count>}}`.
+- **MCP-projecttitel:** `project="gh-workflow-fix"`, `name="gh-workflow-fix"`, `description="Monitor and auto-fix failing GitHub Actions workflows"`.
 
-**MCP-projecttitel:** `project="gh-workflow-fix"`, `name="gh-workflow-fix"`, beschrijving voor register.
+**Aanpak `create_mcp`:**
+```python
+def create_mcp(db: Database, cfg: Config) -> FastMCP:
+    mcp = FastMCP(name="gh-workflow-fix", ...)
+    service = Service(db, github=None, fixer=None, cfg=cfg)  # service voor _maybe_create_issue
 
-- [ ] **Step 1: schrijf de faalende test `tests/test_mcp.py`** — standaard: `mcp.call_tool("health")`, `mcp.call_tool("list_chains")` etc. met fake service.
+    @mcp.tool()
+    async def list_chains(state: str | None = None) -> list[dict]:
+        ...
+
+    @mcp.tool()
+    async def health() -> dict:
+        ...
+
+    return mcp
+```
+- `github` en `fixer` op service zijn `None` — `_maybe_create_issue` werkt niet zonder. Optie: OF maak `create_mcp` aanvaard een service-arg (dan moet serve.py die meegeven); OF skip `create_issue_now` en check of github aanwezig is. De makkelijkste oplossing: `create_mcp(service: Service, cfg: Config)` aanroepen vanuit serve.py met de al aanwezige service-instantie. Dan kan `create_issue_now` werken.
+
+Daarom: `create_mcp(service: Service, cfg: Config) -> FastMCP`. De `serve.py` main() aanroep: `mcp = create_mcp(service, cfg)` (service bestaat al in main()). MCP draait als apart process via stdio — in dat geval is er GEEN service; maak `create_mcp` aan met `db` + `cfg` en maiden service (zonder github/fixer) voor `create_issue_now` no-op (of raise).
+
+**Concrete test `tests/test_mcp.py`:**
+
+```python
+import pytest
+from gh_workflow_fix.db import Database
+from gh_workflow_fix.mcp import create_mcp
+from gh_workflow_fix.models import Chain, Event
+
+
+@pytest.fixture
+def mcp_app(tmp_path):
+    db = Database(tmp_path / "state.db")
+    # ... voeg een testketen toe via db.insert_chain(...) ...
+    return create_mcp(db=db, cfg=...), db
+
+
+async def test_health():
+    db = Database(...)
+    mcp, _ = create_mcp_for_test(db)
+    result = await mcp.call_tool("health", {})
+    assert result.content[0].text  # JSON string met ok=True
+
+
+async def test_list_chains_empty():
+    ...
+
+
+async def test_list_chains_with_state_filter():
+    ...
+```
+
+Test-sjabloon: voor elk tool een korte test die fake data in db stopt en het resultaat verifieert. Gebruik `mcp.call_tool("name", {args})` → `result.structured_content["result"]` of `result.content[0].text`.
+
+- [ ] **Step 1: schrijf de faalende test `tests/test_mcp.py`** — voor elk tool 1 test; geen health-fake nodig (db is echt).
 - [ ] **Step 2: draai en zie dat hij faalt**
 - [ ] **Step 3: schrijf `src/gh_workflow_fix/mcp.py`**
 - [ ] **Step 4: draai en zie dat hij groen is**
