@@ -106,7 +106,9 @@ __version__ = "0.1.0"
 - [ ] **Step 3: schrijf de faalende test `tests/test_config.py`**
 
 ```python
-from gh_workflow_fix.config import Config, load_config
+from pathlib import Path
+
+from gh_workflow_fix.config import load_config
 
 
 def test_load_config_defaults():
@@ -140,9 +142,9 @@ def test_load_config_overrides():
     )
     assert cfg.gh_oc_auto is False
     assert cfg.retry_delays_min == (5, 10)
-    assert cfg.data_dir == "/tmp/data"
+    assert cfg.data_dir == Path("/tmp/data")
     assert cfg.webhook_port == 9999
-    assert cfg.opencode_bin == "/tmp/opencode"
+    assert cfg.opencode_bin == Path("/tmp/opencode")
 
 
 def test_missing_required_env_raises():
