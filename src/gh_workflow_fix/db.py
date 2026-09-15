@@ -145,6 +145,15 @@ class Database:
         retry.id = cur.lastrowid
         return retry
 
+    def update_retry(self, retry: Retry) -> None:
+        self._conn.execute(
+            "UPDATE retries SET finished_at=?, outcome=?, sha_before=?, sha_after=?,"
+            " notes=?, started_at=? WHERE id=?",
+            (retry.finished_at, retry.outcome, retry.sha_before, retry.sha_after,
+             retry.notes, retry.started_at, retry.id),
+        )
+        self._conn.commit()
+
     def list_retries(self, chain_id: int) -> list[Retry]:
         rows = self._conn.execute(
             "SELECT * FROM retries WHERE chain_id = ? ORDER BY id", (chain_id,)
