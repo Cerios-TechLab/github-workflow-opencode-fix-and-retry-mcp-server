@@ -1353,25 +1353,27 @@ git push git@github.com:Cerios-TechLab/github-workflow-opencode-fix-and-retry-mc
 - Test: `tests/test_service.py`
 
 **Interfaces:**
-- Consumes: `Database`, `GitHubAPI`, `Fixer`, `Config`.
+- Consumes: `Database`, `GitHubAPI` (async), `Fixer` (sync `run_fix_pod`), `Config`.
 - Produces: `Service(db, github, fixer, cfg)`:
-  - `handle_webhook(event: Event) -> str /* handled */`: repo-check → conclusie in {`failure`, `timed_out`} · {`success`} → marker-check → keten-upsert + planning; doet issue-creatie op basis van `effective_gh_oc_auto()`.
-  - `tick() -> None`: `due_chains` (state `running`, `next_retry_at <= now`) → voor elke keten `state=running` bevestigen en `fixer.run_fix_pod(chain, sha_before=github.latest_sha(branch))`; na afloop `chain.state` herlezen en bij `fix_error` → `_schedule_or_exhaust(chain)`.
-  - `_schedule_or_exhaust(chain) -> None`: `attempt+1 <= len(effective_retry_delays())` → `attempt=attempt+1`, `next_retry_at=now+delay_before(attempt)`, state `running`; anders state `exhausted` + `_maybe_create_issue(chain)` + foutmelding.
-  - Helpers: `_maybe_create_issue(chain)`; `_decide_kind(event, chain_state) -> handled-waarde`; `_mark_chain_and_event(...)`.
-  - `effective_retry_delays() -> tuple[int, ...]` en `effective_gh_oc_auto() -> bool`: DB-override (`retry_delays_min`, `gh_oc_auto`) wint van env.
+  - `async handle_webhook(event: Event, repo: str | None = None) -> str /* handled */`: repo-check (alleen als `repo` is meegegeven en != `cfg.gh_repo` → event `ignored_repo`) → conclusie-branches → keten-upsert + planning; doet issue-creatie op basis van `effective_gh_oc_auto()`.
+  - `async tick() -> None`: `due_chains(now)` → per keten `sha = await github.latest_sha(branch)`; als `None` → `last_error` loggen en overslaan; anders `await asyncio.to_thread(fixer.run_fix_pod, chain, sha)` (event-loop blijft responsief); daarna keten herlezen; bij state `fix_error` → `await _schedule_or_exhaust(chain)`.
+  - `async _schedule_or_exhaust(chain) -> None`: bij `attempt >= len(delays)` → state `exhausted`, `next_retry_at=None`, `await _maybe_create_issue(chain)`; anders `attempt += 1`, `next_retry_at=now+delay_before(attempt)`, state `running`.
+  - `async _maybe_create_issue(chain) -> None`: zoek bestaand open issue met titel (`find_issue`); als gevonden → `chain.issue_url` uit number opbouwen (geen nieuw); anders `open_issue` → `chain.issue_url` zetten. Werk je `chain` bij via `db.update_chain`.
+  - Helpers: `_issue_title(chain)` (deterministisch: `ghwf-fix {workflow_path} ({head_branch})`), `_issue_body(chain)`.
+  - `effective_retry_delays() -> tuple[int, ...]` en `effective_gh_oc_auto() -> bool`: DB-override (`retry_delays_min`, `gh_oc_auto`) wint van env. `_delay_before(attempt)` gebruikt de effective delays.
 
 **Businessregels (uit design) — samenvatting:**
 - Failing `completed`-event (`failure`/`timed_out`), geen actieve keten:
-  - marker niet gevonden (`workflow_yaml(...)` → None of marker mist) → event `ignored`, geen keten.
+  - `await github.workflow_yaml(path, head_sha)` → `None` (404) of marker ontbreekt → event `ignored`, geen keten, geen issue.
   - marker gevonden:
-    - `gh_oc_auto=false` → issue meteen aanmaken, keten `exhausted`, event `exhausted`.
+    - `gh_oc_auto=false` → keten `exhausted`, `await _maybe_create_issue(chain)`, event `exhausted`.
     - `gh_oc_auto=true` → nieuwe `Chain(attempt=1, state=running, next_retry_at=now+delay_before(1))`, event `new_chain`.
-- Failing `completed`-event op actieve keten (state `running`/`waiting`): `next_retry_at = min(existing, now+delay_before(attempt))`, event `continued`. Let op: probeer GEEN nieuw issue (al dan niet na exhaust) — issue-hond eerst de bestaande keten afhandelen.
-- `success` `completed`-event op actieve keten → state `done`, `next_retry_at=None`, event `done`.
-- `tick()`: keteels met `next_retry_at <= now` → state `running`; `run_fix_pod`; na terugkeer laadt keten opnieuw; `fix_error` → `_schedule_or_exhaust`; `waiting` blijft.
+- Failing event op actieve keten (state `running`/`waiting`): `next_retry_at = min(existing_of_None, now+delay_before(attempt))`, state `running`, event `continued`. Geen nieuw issue.
+- `success` event op actieve keten → state `done`, `next_retry_at=None`, event `done`.
+- Conclusie buiten {`success`,`failure`,`timed_out`} → event `ignored`.
+- `tick()`: na `run_fix_pod` keten herlezen; `fix_error` → `_schedule_or_exhaust`; `waiting` / `running` blijven zoals de fixer ze liet.
 
-- [ ] **Step 1: schrijf de faalende test `tests/test_service.py`** — redelijk compleet (fake github en fixer):
+- [ ] **Step 1: schrijf de faalende test `tests/test_service.py`** (async; pytest-asyncio auto-mode):
 
 ```python
 from dataclasses import replace
@@ -1382,24 +1384,25 @@ from gh_workflow_fix.service import Service
 
 
 class _FakeGithub:
-    def __init__(self):
+    def __init__(self, yaml_text):
+        self.yaml_text = yaml_text
         self.shas = {"main": "sha1"}
         self.issues = []
 
-    def workflow_yaml(self, path, ref):
-        return "on:\n  push:\n# self-heal: true\n"
+    async def workflow_yaml(self, path, ref):
+        return self.yaml_text
 
-    def latest_sha(self, branch):
+    async def latest_sha(self, branch):
         return self.shas.get(branch)
 
-    def open_issue(self, title, body):
+    async def open_issue(self, title, body):
         self.issues.append(title)
         return "https://github.com/acme/app/issues/1"
 
-    def update_issue(self, number, body):
+    async def update_issue(self, number, body):
         pass
 
-    def find_issue(self, title):
+    async def find_issue(self, title):
         return None
 
 
@@ -1411,9 +1414,9 @@ class _FakeFixer:
         self.calls.append((chain.id, sha_before))
 
 
-def _service(cfg, tmp_path):
+def _service(cfg, tmp_path, yaml_text="on:\n  push:\n# self-heal: true\n"):
     db = Database(tmp_path / "state.db")
-    gh = _FakeGithub()
+    gh = _FakeGithub(yaml_text)
     fixer = _FakeFixer()
     svc = Service(db, gh, fixer, cfg)
     return svc, db, gh, fixer
@@ -1425,9 +1428,9 @@ def failing_event(delivery="d1", path=".github/workflows/ci.yml", conclusion="fa
                  conclusion=conclusion, handled="")
 
 
-def test_new_failure_starts_chain_in_schedule(cfg, tmp_path):
+async def test_new_failure_starts_chain_in_schedule(cfg, tmp_path):
     svc, db, gh, fixer = _service(cfg, tmp_path)
-    svc.handle_webhook(failing_event())
+    await svc.handle_webhook(failing_event())
     chain = db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main")
     assert chain is not None
     assert chain.attempt == 1
@@ -1435,43 +1438,68 @@ def test_new_failure_starts_chain_in_schedule(cfg, tmp_path):
     assert gh.issues == []  # auto=true → geen issue nu
 
 
-def test_auto_false_logs_issue_immediately(cfg, tmp_path):
+async def test_auto_false_logs_issue_immediately(cfg, tmp_path):
     cfg = replace(cfg, gh_oc_auto=False)
     svc, db, gh, fixer = _service(cfg, tmp_path)
-    svc.handle_webhook(failing_event())
+    await svc.handle_webhook(failing_event())
     chain = db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main")
     assert chain.state == ChainState.EXHAUSTED.value
     assert gh.issues
 
 
-def test_tick_runs_due_fix(cfg, tmp_path):
+async def test_no_marker_ignored(cfg, tmp_path):
+    svc, db, gh, fixer = _service(cfg, tmp_path, yaml_text="name: x\non: push\n")
+    handled = await svc.handle_webhook(failing_event())
+    assert handled == "ignored"
+    assert db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main") is None
+
+
+async def test_tick_runs_due_fix(cfg, tmp_path):
     svc, db, gh, fixer = _service(cfg, tmp_path)
-    svc.handle_webhook(failing_event())
+    await svc.handle_webhook(failing_event())
     chain = db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main")
     assert chain.next_retry_at is not None
     chain.next_retry_at = utcnow_iso()
     db.update_chain(chain)
-    svc.tick()
+    await svc.tick()
     assert fixer.calls == [(chain.id, "sha1")]
 
 
-def test_success_event_marks_done(cfg, tmp_path):
+async def test_success_event_marks_done(cfg, tmp_path):
     svc, db, gh, fixer = _service(cfg, tmp_path)
-    svc.handle_webhook(failing_event())
+    await svc.handle_webhook(failing_event())
     chain = db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main")
     chain.next_retry_at = None
     chain.state = ChainState.WAITING.value
     db.update_chain(chain)
-    svc.handle_webhook(Event(delivery_id="d2", run_id=11,
-                             workflow_path=".github/workflows/ci.yml",
-                             head_branch="main", head_sha="sha2",
-                             action="completed", conclusion="success", handled=""))
+    await svc.handle_webhook(Event(delivery_id="d2", run_id=11,
+                                   workflow_path=".github/workflows/ci.yml",
+                                   head_branch="main", head_sha="sha2",
+                                   action="completed", conclusion="success", handled=""))
     chain = db.get_chain(chain.id)
     assert chain.state == ChainState.DONE.value
     assert chain.next_retry_at is None
+
+
+async def test_failing_event_on_active_chain_reschedules(cfg, tmp_path):
+    svc, db, gh, fixer = _service(cfg, tmp_path)
+    await svc.handle_webhook(failing_event())
+    chain = db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main")
+    await svc.handle_webhook(failing_event(delivery="d2", conclusion="timed_out"))
+    chain = db.get_chain(chain.id)
+    assert chain.state == ChainState.RUNNING.value
+    assert chain.next_retry_at is not None
+    assert gh.issues == []  # geen dubbel issue
+
+
+async def test_wrong_repo_ignored(cfg, tmp_path):
+    svc, db, gh, fixer = _service(cfg, tmp_path)
+    handled = await svc.handle_webhook(failing_event(), repo="other/org")
+    assert handled == "ignored_repo"
+    assert db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main") is None
 ```
 
- (De `Chain`-import is nodig in `test_success_event_marks_done`; laat hem in de imports staan. Eventueel `event`-logica: gebruik `db.latest_event_time()` om te bevestigen dat events worden weggeschreven.)
+(De `Chain`-import blijft nodig als type-annotatie in sommige helpers; verwijder hem alleen als ruff F401 geeft.)
 
 - [ ] **Step 2: draai en zie dat hij faalt (rood)**
 - [ ] **Step 3: schrijf `src/gh_workflow_fix/service.py`**
