@@ -80,6 +80,7 @@ def _build_event(
         action=action,
         conclusion=wr["conclusion"],
         handled="",
+        workflow_name=wr["name"],
     )
     repo = None
     repo_obj = payload.get("repository")

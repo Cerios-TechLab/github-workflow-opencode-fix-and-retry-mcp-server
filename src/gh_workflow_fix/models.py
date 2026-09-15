@@ -71,5 +71,6 @@ class Event:
     action: str
     conclusion: str
     handled: str
+    workflow_name: str = ""
     created_at: str = field(default_factory=utcnow_iso)
     id: int | None = None

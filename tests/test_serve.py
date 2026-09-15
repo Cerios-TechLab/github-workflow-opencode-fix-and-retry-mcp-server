@@ -141,6 +141,21 @@ async def test_webhook_completed_run_ok(app):
         assert r.json() == {"ok": True, "handled": "new_chain"}
 
 
+async def test_webhook_carries_workflow_name(cfg, tmp_path):
+    db = Database(tmp_path / "state.db")
+    gh = _FakeGithub()
+    fixer = _FakeFixer()
+    app = create_app(db=db, github=gh, fixer=fixer, cfg=cfg)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        r = await _post(client, _payload())
+        assert r.status_code == 200
+    chain = db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main")
+    assert chain is not None
+    assert chain.workflow_name == "ci"
+
+
 async def test_webhook_unsupported_event_reason(app):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"

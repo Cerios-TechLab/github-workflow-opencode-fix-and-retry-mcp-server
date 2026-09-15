@@ -98,7 +98,7 @@ class Service:
         chain = Chain(
             repo=self.cfg.gh_repo,
             workflow_path=event.workflow_path,
-            workflow_name="",
+            workflow_name=event.workflow_name,
             head_branch=event.head_branch,
             run_id=event.run_id,
             attempt=1,
