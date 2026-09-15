@@ -19,6 +19,7 @@ class Config:
     retry_delays_min: tuple[int, ...] = DEFAULT_DELAYS
     data_dir: Path = field(default_factory=lambda: Path("/var/lib/gh-workflow-fix"))
     opencode_bin: Path = field(default_factory=lambda: Path("/root/.opencode/bin/opencode"))
+    gh_api_base: str = "https://api.github.com"
     webhook_host: str = "0.0.0.0"
     webhook_port: int = 18080
     fix_timeout_s: int = 1800
@@ -61,6 +62,7 @@ def load_config(env=None) -> Config:
         retry_delays_min=delays,
         data_dir=Path(env.get("DATA_DIR", "/var/lib/gh-workflow-fix")),
         opencode_bin=Path(env.get("OPENCODE_BIN", "/root/.opencode/bin/opencode")),
+        gh_api_base=env.get("GH_API_BASE", "https://api.github.com"),
         webhook_host=env.get("WEBHOOK_HOST", "0.0.0.0"),
         webhook_port=int(env.get("WEBHOOK_PORT", "18080")),
         fix_timeout_s=int(env.get("FIX_TIMEOUT_S", "1800")),
