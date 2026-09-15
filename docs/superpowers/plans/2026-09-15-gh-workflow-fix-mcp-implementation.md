@@ -1539,29 +1539,67 @@ git push git@github.com:Cerios-TechLab/github-workflow-opencode-fix-and-retry-mc
 - Create: `src/gh_workflow_fix/__main__.py`
 
 **Interfaces:**
-- Consumes: `Service`, `Config`, `Database`, `GitHubAPI`, `Fixer`, `OpenCodeRunner`.
+- Consumes: `Service`, `Config`, `Database`, `GitHubAPI`, `Fixer`.
 - Produces:
-  - `create_app(*, db: Database, github: GitHubAPI, fixer: Fixer, cfg: Config) -> Starlette`: routes `POST /webhook/github` (HMAC-verificatie via `X-Hub-Signature-256`, schending → 401) en `GET /healthz`; start stoppen van de asynchrone tick-loop via lifespan.
-  - `serve.py` `main()`: `load_config()`, db openen, github/fixer opbouwen, uvicorn-run (`host`, `port`).
+  - `create_app(*, db: Database, github: GitHubAPI, fixer: Fixer, cfg: Config) -> Starlette`: routes `POST /webhook/github` (HMAC-verificatie via `X-Hub-Signature-256`, schending → 401) en `GET /healthz`; start/stopt de asynchrone tick-loop via lifespan (`app.state.tick_task`).
+  - `async tick_loop(service: Service, *, interval_s: float, stop_event: asyncio.Event) -> None`: `while not stop_event.is_set()`: `await service.tick()`; extra uitzondering → log via `logging.getLogger(...)` en blijf lopen; daarna `await asyncio.sleep(interval_s)`. **Dit is de testbare seam** — lifespan start `tick_loop` op de achtergrond en cancelled (of settop stop_event) op shutdown.
+  - `serve.py` `main()`: `load_config()`, db openen, `GitHubAPI` (eigen `httpx.AsyncClient`-instance) en `Fixer` (met `OpenCodeRunner`) opbouwen, uvicorn-run (`host`, `port`).
   - `__main__.py`: `from gh_workflow_fix.serve import main; main()`.
 
 **Webhook-contract:**
-- Verifieer `X-Hub-Signature-256` d.m.v. HMAC-SHA256 (hex) over de ruwe body (prefix `sha256=`). Onjuist of ontbrekend → `401`.
+- Verifieer `X-Hub-Signature-256` d.m.v. HMAC-SHA256 (hex) over de **ruwe body** (prefix `sha256=`), vergelijking met `hmac.compare_digest`. Onjuist of ontbrekend → `401 {"ok": false}`.
 - Parse body als dict; `delivery_id` uit header `X-GitHub-Delivery`; `X-GitHub-Event` = event-type (normalizeer naar lower).
-- Verwerk uitsluitend event-type `workflow_run` met `action == "completed"`; `workflow_run.path` is `path@branch` → strip de `@branch`-suffix (controle: suffix komt overeen met `head_branch`, anders suffix afknippen op laatste `@`). Conclusie `success` → `done`-afhandeling in service; conclusie `failure`/`timed_out` → keten-logica; alle andere conclusies → event met `handled="ignored"`.
-- Response bij verwerkte webhook `{"ok": true}`; bij niet te verwerken (verkeerde event-type, ontbrekende velden) → `{"ok": false, "reason": "..."}`.
+- Alleen event-type `workflow_run` wordt verwerkt; anders → `200 {"ok": false, "reason": "unsupported_event"}`.
+- Vereiste velden `action` en `workflow_run` (met `id`, `path`, `head_branch`, `head_sha`, `conclusion`, `name`); ontbreken ze of is `action != "completed"` → `200 {"ok": false, "reason": "..."}`.
+- `workflow_run.path` met `path@branch`-suffix → strip: als het deel na de laatste `@` gelijk is aan `head_branch`, knip af bij die `@`; anders knip af op de laatste `@` (fallback). Gebruik `rsplit("@", 1)[0]`.
+- Bouw `Event(delivery_id, run_id=workflow_run.id, workflow_path=gestript pad, workflow_name=name, head_branch, head_sha, action, conclusion, handled="")` en `await service.handle_webhook(event, repo=repository.full_name)` uit `repository.full_name` als die in de payload zit.
+- Response verwerkte webhook: `200 {"ok": true, "handled": <handled-waarde>}`.
+- `GET /healthz` → `200 {"ok": true, "db": "<path>", "tick": cfg.scheduler_tick_s}`.
 
-- [ ] **Step 1: schrijf de faalende test `tests/test_serve.py`** (gebruik httpx AsyncClient met `ASGITransport` op `create_app`):
+- [ ] **Step 1: schrijf de faalende test `tests/test_serve.py`** (httpx AsyncClient met `ASGITransport`; geen lifespan door ASGITransport — tick-loop-testen via de `tick_loop`-seam direct):
 
 ```python
+import asyncio
 import hashlib
 import hmac
+import json
 
 import httpx
 import pytest
 
-from gh_workflow_fix.serve import create_app
 from gh_workflow_fix.db import Database
+from gh_workflow_fix.models import utcnow_iso
+from gh_workflow_fix.serve import create_app, tick_loop
+from gh_workflow_fix.service import Service
+
+
+class _FakeGithub:
+    async def workflow_yaml(self, path, ref):
+        return "on:\n  push:\n# self-heal: true\n"
+
+    async def latest_sha(self, branch):
+        return "sha1"
+
+    def __init__(self):
+        self.issues = []
+
+    async def open_issue(self, title, body):
+        self.issues.append(title)
+        return "https://github.com/acme/app/issues/1"
+
+    async def update_issue(self, number, body):
+        pass
+
+    async def find_issue(self, title):
+        return None
+
+
+class _FakeFixer:
+    def __init__(self):
+        self.calls = []
+
+    def run_fix_pod(self, chain, sha_before):
+        self.calls.append((chain.id, sha_before))
 
 
 def _sign(secret, body):
@@ -1571,7 +1609,40 @@ def _sign(secret, body):
 @pytest.fixture
 def app(cfg, tmp_path):
     db = Database(tmp_path / "state.db")
-    return create_app(db=db, cfg=cfg)
+    gh = _FakeGithub()
+    fixer = _FakeFixer()
+    return create_app(db=db, github=gh, fixer=fixer, cfg=cfg)
+
+
+def _payload(**overrides):
+    body = {
+        "action": "completed",
+        "repository": {"full_name": "acme/app"},
+        "workflow_run": {
+            "id": 10,
+            "name": "ci",
+            "path": ".github/workflows/ci.yml@main",
+            "head_branch": "main",
+            "head_sha": "sha1",
+            "conclusion": "failure",
+        },
+    }
+    body.update(overrides)
+    return body
+
+
+async def _post(client, body, event="workflow_run", delivery="d1", secret="s3cret"):
+    data = json.dumps(body).encode()
+    return await client.post(
+        "/webhook/github",
+        content=data,
+        headers={
+            "X-GitHub-Event": event,
+            "X-GitHub-Delivery": delivery,
+            "X-Hub-Signature-256": _sign(secret, data),
+            "Content-Type": "application/json",
+        },
+    )
 
 
 async def test_webhook_hmac_required(app):
@@ -1584,29 +1655,73 @@ async def test_webhook_hmac_required(app):
         assert r.status_code == 401
 
 
-async def test_webhook_completed_run(app):
-    body = json.dumps({
-        "action": "completed",
-        "workflow_run": {
-            "id": 10,
-            "name": "ci",
-            "path": ".github/workflows/ci.yml@main",
-            "head_branch": "main",
-            "head_sha": "sha1",
-            "conclusion": "failure",
-        },
-    }).encode()
-    headers = {
-        "X-GitHub-Event": "workflow_run",
-        "X-GitHub-Delivery": "d1",
-        "X-Hub-Signature-256": _sign("s3cret", body),
-        "Content-Type": "application/json",
-    }
+async def test_webhook_bad_signature_401(app):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                  base_url="http://test") as client:
-        r = await client.post("/webhook/github", content=body, headers=headers)
+        data = json.dumps(_payload()).encode()
+        r = await client.post("/webhook/github", content=data, headers={
+            "X-GitHub-Event": "workflow_run",
+            "X-GitHub-Delivery": "d1",
+            "X-Hub-Signature-256": _sign("wrong", data),
+        })
+        assert r.status_code == 401
+
+
+async def test_webhook_completed_run_ok(app):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as client:
+        r = await _post(client, _payload())
         assert r.status_code == 200
+        assert r.json() == {"ok": True, "handled": "new_chain"}
+
+
+async def test_webhook_unsupported_event_reason(app):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as client:
+        r = await _post(client, _payload(), event="push")
+        assert r.status_code == 200
+        assert r.json()["ok"] is False
+
+
+async def test_webhook_success_conclusion_marks_done(app):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as client:
+        r = await _post(client, _payload(workflow_run={**_payload()["workflow_run"],
+                                                      "conclusion": "success"}))
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "handled": "ignored"}
+
+
+async def test_healthz(app, tmp_path):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as client:
+        r = await client.get("/healthz")
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+
+
+async def test_tick_loop_runs_until_stop(cfg, tmp_path):
+    db = Database(tmp_path / "state.db")
+    gh = _FakeGithub()
+    fixer = _FakeFixer()
+    svc = Service(db, gh, fixer, cfg)
+    await svc.handle_webhook(_event())
+    chain = db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main")
+    chain.next_retry_at = utcnow_iso()
+    db.update_chain(chain)
+
+    stop = asyncio.Event()
+    task = asyncio.create_task(tick_loop(svc, interval_s=0.01, stop_event=stop))
+    for _ in range(500):
+        if fixer.calls:
+            break
+        await asyncio.sleep(0.01)
+    stop.set()
+    await task
+    assert fixer.calls
 ```
+
+Waar `_event()` een `Event(delivery_id="d1", run_id=10, workflow_path=".github/workflows/ci.yml", head_branch="main", head_sha="sha1", action="completed", conclusion="failure", handled="")` is.
 
 - [ ] **Step 2: draai en zie dat hij faalt**
 - [ ] **Step 3: schrijf `src/gh_workflow_fix/serve.py`** — structuur:
@@ -1618,7 +1733,7 @@ def create_app(*, db, github, fixer, cfg) -> Starlette:
     return app
 ```
 
-Webhook-body → Event; start van de achtergrondtick-loop via starlette-lifespan: `app.state.tick_task = asyncio.create_task(_tick_loop(...))` bij startup, cancel bij shutdown; `_tick_loop` roept elke `cfg.scheduler_tick_s` seconden `service.tick()` aan.
+Webhook-body → Event; tick-loop via starlette-lifespan: bij startup `app.state.tick_task = asyncio.create_task(tick_loop(service, interval_s=cfg.scheduler_tick_s, stop_event=asyncio.Event()))`; bij shutdown `tick_task.cancel()` (of stop_event.set() + `await task`) en swallowed `CancelledError`. In `create_app` altijd eigen `service = Service(db, github, fixer, cfg)`.
 
 - [ ] **Step 4: draai en zie dat hij groen is**
 - [ ] **Step 5: ruff + commit + push**
