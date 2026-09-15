@@ -415,7 +415,12 @@ def test_due_chains_threshold(tmp_path):
     c.next_retry_at = now
     db.insert_chain(c)
     assert len(db.due_chains(now)) == 1
-    assert len(db.due_chains("2999-01-01T00:00:00+00:00")) == 0
+    future = _mk_chain()
+    future.workflow_path = ".github/workflows/future.yml"
+    future.next_retry_at = "2999-01-01T00:00:00+00:00"
+    db.insert_chain(future)
+    assert len(db.due_chains(now)) == 1  # future nog niet due
+    assert len(db.due_chains("2999-01-01T00:00:00+00:00")) == 2  # beide due
 
 
 def test_list_chains_state_filter(tmp_path):
