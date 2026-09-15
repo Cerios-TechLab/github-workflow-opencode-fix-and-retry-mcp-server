@@ -1018,72 +1018,187 @@ git push git@github.com:Cerios-TechLab/github-workflow-opencode-fix-and-retry-mc
 - Test: `tests/test_opencode_runner.py`
 
 **Interfaces:**
-- Consumes: `Config` (opencode_bin, fix_timeout_s, gh_token), een werkmapfactory.
+- Consumes: `Config` (opencode_bin, fix_timeout_s, gh_token, data_dir).
 - Produces: `OpenCodeRunner` met:
   - `run_fix(chain_id: int, attempt: int, repo: str, branch: str, workflow_path: str, marker: str, sha: str) -> FixResult`
-  - `FixResult` (dataclass): `sha_before`, `sha_after` (None bij opencode-falen), `exit_code`, `notes: str`, `ok: bool`.
-  - Drafts no `DraftPlan` — genegeerd (rechtstreeks werken).
+  - `FixResult` (dataclass): `sha_before`, `sha_after` (None bij opencode-falen/timeout), `exit_code: int` (-1 bij timeout), `notes: str`, `ok: bool`.
+  - `CmdResult` (NamedTuple): `returncode: int`, `stdout: str`.
+  - Testable seams: `_git(args: list[str], cwd: Path) -> CmdResult` en `_opencode(args: list[str], cwd: Path) -> CmdResult`, beide monkeypatch-able instance-methoden.
 
-**Uitvoeringscontract:**
-1. Maak werkmap `{data_dir}/worktrees/fix-{chain_id}-{attempt}`.
-2. `git init -q` + `git remote add origin git@github.com:{repo}.git` + `git fetch -q origin {branch}` (diep genoeg voor `git checkout`; gebruik `git -C` flag).
-3. `git checkout -q --detach origin/{branch}`.
-4. Schrijf `briefing.md` in de werkmap (executeerbaar? nee — alleen lezen).
-5. Voer uit (met timeout `fix_timeout_s`, cwd=werkmap):
-   `{opencode_bin} run --auto --title ghwf-fix-{chain_id}-{attempt} --project {cwd} --message "fix failing GitHub Actions workflow {workflow_path} (sha {sha}); marker '{marker}'"`.
-   Zet `GITHUB_TOKEN` + `GH_TOKEN` in de subprocess-env zodat code in de werkmap kan pushen.
-6. Haal `sha_after` op via `git -C {werk} rev-parse HEAD` en `git -C {werk} ls-remote origin {branch}` (als remote-sha verschilt van `sha_before` → pusht de agent; anders heeft hij niets gepusht).
+**Uitvoeringscontract (`run_fix`):**
+1. Werkmap `{cfg.data_dir}/worktrees/fix-{chain_id}-{attempt}` aanmaken.
+2. `_git(["init", "-q"], wd)`, `_git(["remote", "add", "origin", f"git@github.com:{repo}.git"], wd)`, `_git(["fetch", "-q", "origin", branch], wd)`, `_git(["checkout", "-q", "--detach", f"origin/{branch}"], wd)`. Git-exit != 0 per stap → `FixResult(ok=False, notes="git: <args> exit <code>", exit_code=code)`.
+3. `briefing.md` schrijven in wd: minimal instructie met werkstroom, sha, marker (met-aangesloten brief-patroon).
+4. `_opencode(["run", "--auto", "--title", f"ghwf-fix-{chain_id}-{attempt}", "--project", str(wd), "--message", f"fix failing GitHub Actions workflow {workflow_path} (sha {sha}); marker '{marker}'"], wd)` met `env={**os.environ, "GITHUB_TOKEN": cfg.gh_token, "GH_TOKEN": cfg.gh_token}`, `timeout=cfg.fix_timeout_s`.
+   - `subprocess.TimeoutExpired` → `FixResult(ok=False, sha_after=None, exit_code=-1, notes="opencode timeout")`.
+   - `returncode != 0` → `FixResult(ok=False, sha_after=None, exit_code=rc, notes="opencode exit <rc>")`.
+5. `ok=True`: lees `_git(["ls-remote", "origin", branch], wd).stdout` → eerste token van eerste regel = `sha_after` (kan gelijk zijn aan `sha_before`; Fixer beslist over rerun). `FixResult(sha_before=sha, sha_after=..., exit_code=0, notes="", ok=True)`.
 
 - [ ] **Step 1: schrijf de faalende test `tests/test_opencode_runner.py`**
 
 ```python
-import os
+import subprocess
 
-import pytest
-
-from gh_workflow_fix.opencode_runner import FixResult, OpenCodeRunner
+from gh_workflow_fix.opencode_runner import CmdResult, FixResult, OpenCodeRunner
 
 
-class _FakeGit:
-    def __init__(self, ok=True, sha_after="abc"):
-        self.calls = []
-        self.ok = ok
-        self.sha_after = sha_after
-
-    def run(self, args, **kwargs):
-        self.calls.append(args)
-        return _Result(self.sha_after if self.ok else None)
+def _ok(stdout=""):
+    return CmdResult(returncode=0, stdout=stdout)
 
 
-class _Result:
-    def __init__(self, stdout):
-        self.stdout = stdout or ""
-
-
-def test_fix_runs_and_reports_ok(cfg, tmp_path, monkeypatch):
-    fake = _FakeGit(sha_after="abc123")
+def _mk_runner(cfg, git, opencode, monkeypatch):
     runner = OpenCodeRunner(cfg)
-    runner._git = lambda *a, **k: fake.run(*a, **k)
-    result = runner.run_fix(chain_id=1, attempt=1, repo="acme/app",
-                            branch="main", workflow_path=".github/workflows/ci.yml",
-                            marker="# self-heal: true", sha="old")
-    assert result.ok is True
-    assert result.sha_before == "old"
-    assert result.sha_after == "abc123"
+    monkeypatch.setattr(runner, "_git", git)
+    monkeypatch.setattr(runner, "_opencode", opencode)
+    return runner
 
 
-def test_fix_reports_opencode_failure(cfg, tmp_path, monkeypatch):
-    fake = _FakeGit(ok=False)
-    runner = OpenCodeRunner(cfg)
-    runner._git = lambda *a, **k: fake.run(*a, **k)
-    result = runner.run_fix(chain_id=1, attempt=1, repo="acme/app",
-                            branch="main", workflow_path="p", marker="m", sha="old")
-    assert result.ok is False
-    assert result.sha_after is None
+def test_fix_success_reports_ok(cfg, tmp_path, monkeypatch):
+    def git(args, cwd):
+        if args[0] == "ls-remote":
+            return _ok("abc123\trefs/heads/main")
+        return _ok()
+
+    def opencode(args, cwd):
+        assert cwd == tmp_path / "worktrees" / "fix-1-2"
+        assert args[0] == "run" and "--auto" in args
+        return _ok()
+
+    runner = _mk_runner(cfg, git, opencode, monkeypatch)
+    res = runner.run_fix(chain_id=1, attempt=2, repo="acme/app", branch="main",
+                         workflow_path=".github/workflows/ci.yml",
+                         marker="# self-heal: true", sha="old")
+    assert res.ok is True
+    assert res.sha_before == "old"
+    assert res.sha_after == "abc123"
+    brief = (tmp_path / "worktrees" / "fix-1-2" / "briefing.md").read_text()
+    assert "ci.yml" in brief
+
+
+def test_opencode_failure_reports_not_ok(cfg, tmp_path, monkeypatch):
+    def git(args, cwd):
+        return _ok("old\trefs/heads/main")
+
+    def opencode(args, cwd):
+        return CmdResult(returncode=1, stdout="")
+
+    runner = _mk_runner(cfg, git, opencode, monkeypatch)
+    res = runner.run_fix(chain_id=1, attempt=1, repo="acme/app", branch="main",
+                         workflow_path="p", marker="m", sha="old")
+    assert res.ok is False
+    assert res.sha_after is None
+    assert res.exit_code == 1
+
+
+def test_timeout_reports_not_ok(cfg, tmp_path, monkeypatch):
+    def git(args, cwd):
+        return _ok()
+
+    def opencode(args, cwd):
+        raise subprocess.TimeoutExpired(cmd="opencode", timeout=0)
+
+    runner = _mk_runner(cfg, git, opencode, monkeypatch)
+    res = runner.run_fix(chain_id=1, attempt=1, repo="acme/app", branch="main",
+                         workflow_path="p", marker="m", sha="old")
+    assert res.ok is False
+    assert res.sha_after is None
+    assert res.exit_code == -1
+    assert "timeout" in res.notes.lower()
 ```
 
 - [ ] **Step 2: draai en zie dat hij faalt**
-- [ ] **Step 3: schrijf `src/gh_workflow_fix/opencode_runner.py`** — `_git` via `subprocess.run([...])` (gelogd, non-fatal per stap? nee: exit != 0 → FixResult niet-ok met notes; opencode-falen → exit != 0); `_opencode` via `subprocess.run(..., env={**os.environ, "GITHUB_TOKEN": cfg.gh_token, "GH_TOKEN": cfg.gh_token}, timeout=cfg.fix_timeout_s, capture_output=True)`.
+- [ ] **Step 3: schrijf `src/gh_workflow_fix/opencode_runner.py`**
+
+```python
+"""Lokale opencode fix-sessie: clone, briefing, run, sha-vergelijking."""
+from __future__ import annotations
+
+import os
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass
+class FixResult:
+    sha_before: str | None
+    sha_after: str | None
+    exit_code: int
+    notes: str = ""
+    ok: bool = False
+
+
+class CmdResult(tuple):
+    """Tuple-variant om subprocess-achtige resultaten te modelleren (testbaar)."""
+
+    def __new__(cls, returncode: int, stdout: str):
+        return tuple.__new__(cls, (returncode, stdout))
+
+    @property
+    def returncode(self) -> int:
+        return self[0]
+
+    @property
+    def stdout(self) -> str:
+        return self[1]
+
+
+class OpenCodeRunner:
+    def __init__(self, cfg):
+        self.cfg = cfg
+
+    # -- testbare seams ------------------------------------------------------
+    def _git(self, args: list[str], cwd: Path) -> CmdResult:
+        return self._run(["git", *args], cwd=cwd)
+
+    def _opencode(self, args: list[str], cwd: Path) -> CmdResult:
+        env = {**os.environ, "GITHUB_TOKEN": self.cfg.gh_token, "GH_TOKEN": self.cfg.gh_token}
+        return self._run([str(self.cfg.opencode_bin), *args], cwd=cwd, env=env,
+                         timeout=self.cfg.fix_timeout_s)
+
+    def _run(self, cmd: list[str], *, cwd: Path, env=None, timeout=None) -> CmdResult:
+        proc = subprocess.run(cmd, cwd=str(cwd), env=env, capture_output=True,
+                              text=True, timeout=timeout)
+        return CmdResult(proc.returncode, proc.stdout.strip())
+
+    # -- conversatie ---------------------------------------------------------
+    def run_fix(self, *, chain_id: int, attempt: int, repo: str, branch: str,
+                workflow_path: str, marker: str, sha: str) -> FixResult:
+        wd = self.cfg.data_dir / "worktrees" / f"fix-{chain_id}-{attempt}"
+        wd.mkdir(parents=True, exist_ok=True)
+        for args in (
+            ["init", "-q"],
+            ["remote", "add", "origin", f"git@github.com:{repo}.git"],
+            ["fetch", "-q", "origin", branch],
+            ["checkout", "-q", "--detach", f"origin/{branch}"],
+        ):
+            res = self._git(args, wd)
+            if res.returncode != 0:
+                return FixResult(sha_before=sha, sha_after=None, exit_code=res.returncode,
+                                 notes=f"git {' '.join(args)} exit {res.returncode}", ok=False)
+        (wd / "briefing.md").write_text(
+            f"# Fix-opdracht\n\nRepareer de failing GitHub Actions workflow:\n"
+            f"- bestand: {workflow_path}\n- branch: {branch}\n- sha: {sha}\n"
+            f"- status-marker: {marker}\n\nPus de fix naar dezelfde branch.\n"
+        )
+        try:
+            res = self._opencode([
+                "run", "--auto", "--title", f"ghwf-fix-{chain_id}-{attempt}",
+                "--project", str(wd),
+                "--message",
+                f"fix failing GitHub Actions workflow {workflow_path} (sha {sha}); marker '{marker}'",
+            ], wd)
+        except subprocess.TimeoutExpired:
+            return FixResult(sha_before=sha, sha_after=None, exit_code=-1,
+                             notes="opencode timeout", ok=False)
+        if res.returncode != 0:
+            return FixResult(sha_before=sha, sha_after=None, exit_code=res.returncode,
+                             notes=f"opencode exit {res.returncode}", ok=False)
+        remote = self._git(["ls-remote", "origin", branch], wd).stdout
+        sha_after = remote.splitlines()[0].split("\t")[0] if remote else sha
+        return FixResult(sha_before=sha, sha_after=sha_after, exit_code=0, notes="", ok=True)
+```
+
 - [ ] **Step 4: draai en zie dat hij groen is**
 - [ ] **Step 5: ruff + commit + push**
 
