@@ -109,13 +109,8 @@ class Service:
         )
         self.db.insert_chain(chain)
         if not self.effective_gh_oc_auto():
-            chain.state = ChainState.EXHAUSTED.value
-            chain.next_retry_at = None
-            self.db.update_chain(chain)
             await self._maybe_create_issue(chain)
-            event.handled = "exhausted"
-        else:
-            event.handled = "new_chain"
+        event.handled = "new_chain"
         self.db.insert_event(event)
         return event.handled
 

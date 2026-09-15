@@ -1366,7 +1366,7 @@ git push git@github.com:Cerios-TechLab/github-workflow-opencode-fix-and-retry-mc
 - Failing `completed`-event (`failure`/`timed_out`), geen actieve keten:
   - `await github.workflow_yaml(path, head_sha)` → `None` (404) of marker ontbreekt → event `ignored`, geen keten, geen issue.
   - marker gevonden:
-    - `gh_oc_auto=false` → keten `exhausted`, `await _maybe_create_issue(chain)`, event `exhausted`.
+    - `gh_oc_auto=false` → issue meteen via `await _maybe_create_issue(chain)`; keten blijft `running` (retries gaan door, design verwijst "wordt voortgezet"); event `new_chain`.
     - `gh_oc_auto=true` → nieuwe `Chain(attempt=1, state=running, next_retry_at=now+delay_before(1))`, event `new_chain`.
 - Failing event op actieve keten (state `running`/`waiting`): `next_retry_at = min(existing_of_None, now+delay_before(attempt))`, state `running`, event `continued`. Geen nieuw issue.
 - `success` event op actieve keten → state `done`, `next_retry_at=None`, event `done`.
@@ -1440,11 +1440,13 @@ async def test_new_failure_starts_chain_in_schedule(cfg, tmp_path):
 
 async def test_auto_false_logs_issue_immediately(cfg, tmp_path):
     cfg = replace(cfg, gh_oc_auto=False)
-    svc, db, gh, fixer = _service(cfg, tmp_path)
+    svc, db, gh, _fixer = _service(cfg, tmp_path)
     await svc.handle_webhook(failing_event())
     chain = db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main")
-    assert chain.state == ChainState.EXHAUSTED.value
-    assert gh.issues
+    assert chain is not None
+    assert chain.state == ChainState.RUNNING.value
+    assert chain.next_retry_at is not None
+    assert gh.issues  # auto=false → issue direct, keten zet door
 
 
 async def test_no_marker_ignored(cfg, tmp_path):
@@ -1497,6 +1499,20 @@ async def test_wrong_repo_ignored(cfg, tmp_path):
     handled = await svc.handle_webhook(failing_event(), repo="other/org")
     assert handled == "ignored_repo"
     assert db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main") is None
+
+
+async def test_exhausted_chain_is_not_active_and_not_resurrected(cfg, tmp_path):
+    svc, db, gh, fixer = _service(cfg, tmp_path)
+    await svc.handle_webhook(failing_event())
+    chain = db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main")
+    chain.state = ChainState.EXHAUSTED.value
+    chain.next_retry_at = None
+    db.update_chain(chain)
+    assert db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main") is None
+    handled = await svc.handle_webhook(failing_event(delivery="d3"))
+    assert handled == "new_chain"
+    fresh = db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main")
+    assert fresh is not None and fresh.id != chain.id
 ```
 
 (De `Chain`-import blijft nodig als type-annotatie in sommige helpers; verwijder hem alleen als ruff F401 geeft.)

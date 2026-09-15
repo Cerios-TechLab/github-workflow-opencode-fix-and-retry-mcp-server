@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS settings (
 """
 
 _ACTIVE_STATES = tuple(
-    s.value for s in ChainState if s is not ChainState.DONE
+    s.value for s in ChainState if s not in (ChainState.DONE, ChainState.EXHAUSTED)
 )
 
 

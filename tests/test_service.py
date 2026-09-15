@@ -65,8 +65,10 @@ async def test_auto_false_logs_issue_immediately(cfg, tmp_path):
     svc, db, gh, _fixer = _service(cfg, tmp_path)
     await svc.handle_webhook(failing_event())
     chain = db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main")
-    assert chain.state == ChainState.EXHAUSTED.value
-    assert gh.issues
+    assert chain is not None
+    assert chain.state == ChainState.RUNNING.value
+    assert chain.next_retry_at is not None
+    assert gh.issues  # auto=false → issue direct
 
 
 async def test_no_marker_ignored(cfg, tmp_path):
@@ -112,6 +114,20 @@ async def test_failing_event_on_active_chain_reschedules(cfg, tmp_path):
     assert chain.state == ChainState.RUNNING.value
     assert chain.next_retry_at is not None
     assert gh.issues == []  # geen dubbel issue
+
+
+async def test_exhausted_chain_is_not_active_and_not_resurrected(cfg, tmp_path):
+    svc, db, _gh, _fixer = _service(cfg, tmp_path)
+    await svc.handle_webhook(failing_event())
+    chain = db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main")
+    chain.state = ChainState.EXHAUSTED.value
+    chain.next_retry_at = None
+    db.update_chain(chain)
+    assert db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main") is None
+    handled = await svc.handle_webhook(failing_event(delivery="d3"))
+    assert handled == "new_chain"
+    fresh = db.get_active_chain("acme/app", ".github/workflows/ci.yml", "main")
+    assert fresh is not None and fresh.id != chain.id
 
 
 async def test_wrong_repo_ignored(cfg, tmp_path):
