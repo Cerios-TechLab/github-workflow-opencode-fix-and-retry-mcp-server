@@ -1,0 +1,15 @@
+[Unit]
+Description=GitHub Workflow Fix Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/gh-workflow-fix
+ExecStart=/root/gh-workflow-fix/.venv/bin/python -m gh_workflow_fix
+EnvironmentFile=/etc/gh-workflow-fix.env
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
