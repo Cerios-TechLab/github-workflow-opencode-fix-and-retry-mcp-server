@@ -21,6 +21,8 @@ def _client(cfg, handler):
 async def test_workflow_yaml_decodes(cfg):
     def handler(request):
         assert request.headers["authorization"] == "Bearer t"
+        # Contract: JSON-response (base64 content), NIET de raw-variant.
+        assert "vnd.github.raw" not in request.headers.get("accept", "")
         assert request.url.path == "/repos/acme/app/contents/.github/workflows/ci.yml"
         assert request.url.params["ref"] == "sha1"
         return httpx.Response(200, json={"content": ENC, "encoding": "base64"})

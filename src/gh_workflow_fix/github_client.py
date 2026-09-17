@@ -28,7 +28,7 @@ class GitHubAPI:
         r = await self._http.get(
             self._repo_url(f"contents/{path}"),
             params={"ref": ref},
-            headers={**self._auth(), "accept": "application/vnd.github.raw"},
+            headers=self._auth(),
         )
         if r.status_code == 404:
             return None
