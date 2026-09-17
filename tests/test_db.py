@@ -88,3 +88,23 @@ def test_overrides_and_fix_lock(tmp_path):
     db.release_fix_lock()
     assert db.acquire_fix_lock(c2.id) is True
     db.release_fix_lock()
+
+def test_db_usable_from_worker_thread(tmp_path):
+    """Regression: daemon draait fix-pods via asyncio.to_thread(); de DB-connectie
+    is in de eventloop-thread gemaakt en moet ook uit worker-threads bruikbaar zijn."""
+    import threading
+
+    db = Database(tmp_path / "state.db")
+    errors = []
+
+    def worker():
+        try:
+            db.acquire_fix_lock(1)
+            db.release_fix_lock()
+        except Exception as exc:  # noqa: BLE001 — worker-thread-fouten moeten hier landen, niet stil crashen
+            errors.append(exc)
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+    assert errors == []
