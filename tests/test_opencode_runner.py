@@ -1,3 +1,4 @@
+import dataclasses
 import subprocess
 
 from gh_workflow_fix.opencode_runner import CmdResult, OpenCodeRunner
@@ -23,6 +24,7 @@ def test_fix_success_reports_ok(cfg, tmp_path, monkeypatch):
     def opencode(args, cwd):
         assert cwd == tmp_path / "worktrees" / "fix-1-2"
         assert args[0] == "run" and "--auto" in args
+        assert "--model" not in args
         return _ok()
 
     runner = _mk_runner(cfg, git, opencode, monkeypatch)
@@ -34,6 +36,23 @@ def test_fix_success_reports_ok(cfg, tmp_path, monkeypatch):
     assert res.sha_after == "abc123"
     brief = (tmp_path / "worktrees" / "fix-1-2" / "briefing.md").read_text()
     assert "ci.yml" in brief
+
+
+def test_fix_passes_model_flag_when_configured(cfg, tmp_path, monkeypatch):
+    cfg = dataclasses.replace(cfg, opencode_model="opencode/big-pickle")
+
+    def git(args, cwd):
+        return _ok("old\trefs/heads/main")
+
+    def opencode(args, cwd):
+        assert "--model" in args
+        assert args[args.index("--model") + 1] == "opencode/big-pickle"
+        return _ok()
+
+    runner = _mk_runner(cfg, git, opencode, monkeypatch)
+    res = runner.run_fix(chain_id=1, attempt=1, repo="acme/app", branch="main",
+                         workflow_path="p", marker="m", sha="old")
+    assert res.ok is True
 
 
 def test_opencode_failure_reports_not_ok(cfg, tmp_path, monkeypatch):

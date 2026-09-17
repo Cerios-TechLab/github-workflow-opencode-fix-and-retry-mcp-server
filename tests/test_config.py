@@ -17,6 +17,7 @@ def test_load_config_defaults():
     assert cfg.self_heal_marker == "# self-heal: true"
     assert cfg.retry_delays_min == (15, 30, 60)
     assert cfg.webhook_port == 18080
+    assert cfg.opencode_model is None
 
 
 def test_load_config_overrides():
@@ -37,6 +38,20 @@ def test_load_config_overrides():
     assert cfg.data_dir == Path("/tmp/data")
     assert cfg.webhook_port == 9999
     assert cfg.opencode_bin == Path("/tmp/opencode")
+    assert cfg.opencode_model is None
+
+
+def test_load_config_opencode_model():
+    cfg = load_config(
+        {
+            "GH_TOKEN": "tok",
+            "GH_REPO": "acme/app",
+            "GH_OC_AUTO": "true",
+            "WEBHOOK_SECRET": "s3cret",
+            "OPENCODE_MODEL": "opencode/big-pickle",
+        }
+    )
+    assert cfg.opencode_model == "opencode/big-pickle"
 
 
 def test_missing_required_env_raises():

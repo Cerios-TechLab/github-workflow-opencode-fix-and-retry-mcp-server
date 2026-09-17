@@ -70,9 +70,13 @@ class OpenCodeRunner:
             f"- status-marker: {marker}\n\nPus de fix naar dezelfde branch.\n"
         )
         try:
-            res = self._opencode([
+            args = [
                 "run", "--auto", "--title", f"ghwf-fix-{chain_id}-{attempt}",
                 "--project", str(wd),
+            ]
+            if self.cfg.opencode_model:
+                args += ["--model", self.cfg.opencode_model]
+            res = self._opencode(args + [
                 "--message",
                 f"fix failing GitHub Actions workflow {workflow_path} (sha {sha}); marker '{marker}'",
             ], wd)

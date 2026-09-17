@@ -24,6 +24,7 @@ class Config:
     webhook_port: int = 18080
     fix_timeout_s: int = 1800
     scheduler_tick_s: int = 60
+    opencode_model: str | None = None
 
     def delay_before(self, attempt: int) -> int:
         """Wachttijd in minuten vóór poging `attempt` (1-based)."""
@@ -67,4 +68,5 @@ def load_config(env=None) -> Config:
         webhook_port=int(env.get("WEBHOOK_PORT", "18080")),
         fix_timeout_s=int(env.get("FIX_TIMEOUT_S", "1800")),
         scheduler_tick_s=int(env.get("SCHEDULER_TICK_S", "60")),
+        opencode_model=env.get("OPENCODE_MODEL") or None,
     )
