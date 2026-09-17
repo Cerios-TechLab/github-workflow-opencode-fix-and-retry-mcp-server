@@ -24,6 +24,8 @@ def test_fix_success_reports_ok(cfg, tmp_path, monkeypatch):
     def opencode(args, cwd):
         assert cwd == tmp_path / "worktrees" / "fix-1-2"
         assert args[0] == "run" and "--auto" in args
+        assert "--dir" in args
+        assert args[args.index("--dir") + 1] == str(tmp_path / "worktrees" / "fix-1-2")
         assert "--model" not in args
         return _ok()
 

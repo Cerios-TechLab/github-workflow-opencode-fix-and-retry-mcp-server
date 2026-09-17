@@ -72,7 +72,7 @@ class OpenCodeRunner:
         try:
             args = [
                 "run", "--auto", "--title", f"ghwf-fix-{chain_id}-{attempt}",
-                "--project", str(wd),
+                "--dir", str(wd),
             ]
             if self.cfg.opencode_model:
                 args += ["--model", self.cfg.opencode_model]
