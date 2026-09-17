@@ -1,9 +1,61 @@
 """Tests voor de FastMCP stdio-server tools."""
 import json
+import os
+import subprocess
+import sys
 
 from gh_workflow_fix.db import Database
 from gh_workflow_fix.mcp import create_mcp
 from gh_workflow_fix.models import Chain, ChainState, utcnow_iso
+
+
+def test_stdio_entrypoint_handshake(tmp_path):
+    """`python -m gh_workflow_fix.mcp` moet een werkende stdio-server starten."""
+    env = dict(os.environ)
+    env.update(
+        {
+            "GH_TOKEN": "t",
+            "GH_REPO": "acme/app",
+            "GH_OC_AUTO": "true",
+            "WEBHOOK_SECRET": "s3cret",
+            "DATA_DIR": str(tmp_path),
+            "FASTMCP_SHOW_SERVER_BANNER": "false",
+        }
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "gh_workflow_fix.mcp"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        text=True,
+    )
+    assert proc.stdin is not None
+    assert proc.stdout is not None
+    request = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "pytest", "version": "0"},
+        },
+    }
+    proc.stdin.write(json.dumps(request) + "\n")
+    proc.stdin.flush()
+    line = proc.stdout.readline()
+    try:
+        assert line, "geen init-response op stdout — start -m gh_workflow_fix.mcp geen server?"
+        msg = json.loads(line)
+        assert msg.get("id") == 1
+        assert msg["result"]["serverInfo"]["name"] == "gh-workflow-fix"
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 def _mk_chain(**overrides):

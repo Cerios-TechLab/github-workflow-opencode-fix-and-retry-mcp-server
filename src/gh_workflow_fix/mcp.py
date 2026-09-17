@@ -5,7 +5,7 @@ from collections import Counter
 
 from fastmcp import FastMCP
 
-from gh_workflow_fix.config import Config
+from gh_workflow_fix.config import Config, load_config
 from gh_workflow_fix.db import Database
 from gh_workflow_fix.models import Chain, ChainState, utcnow_iso
 from gh_workflow_fix.service import Service
@@ -140,3 +140,15 @@ def create_mcp(db: Database, cfg: Config) -> FastMCP:
         }
 
     return mcp
+
+
+def main() -> None:
+    """Start de MCP-server over stdio (``python -m gh_workflow_fix.mcp``)."""
+    cfg = load_config()
+    db = Database(cfg.data_dir / "state.db")
+    mcp = create_mcp(db=db, cfg=cfg)
+    mcp.run()
+
+
+if __name__ == "__main__":
+    main()
