@@ -10,6 +10,29 @@ and on repeated failure open a GitHub issue. The MCP server surfaces the chains
 (`list_chains`, `get_chain`, `pause_chain`, `resume_chain`, `retry_now`,
 `create_issue_now`, `set_config`, `health`) to any MCP client.
 
+## Precheck: OpenCode via curl
+
+Before anything else, make sure OpenCode is installed and reachable. OpenCode is
+commonly installed with `curl` and is **not** on `PATH` by default (e.g. it lands
+in `/root/.opencode/bin/opencode`). The daemon will not find it unless you point
+`OPENCODE_BIN` at the binary:
+
+```bash
+# install OpenCode (curl) — note where it lands
+curl -fsSL https://opencode.ai/install | sh
+# /root/.opencode/bin/opencode  (or similar, depending on the installer)
+
+# tell the daemon where to find it
+export OPENCODE_BIN=/root/.opencode/bin/opencode
+```
+
+If `OPENCODE_BIN` is unset, the daemon falls back to `opencode` on `PATH` and the
+fix runner will fail with "executable not found" on the first chain. Verify with:
+
+```bash
+test -x "$OPENCODE_BIN" && echo "ok" || echo "OPENCODE_BIN not executable"
+```
+
 ## Architecture
 
 ```
@@ -63,25 +86,8 @@ pip install gh-workflow-fix-mcp
 
 Requires Python >= 3.11 and [OpenCode](https://opencode.ai) installed for the fix
 runner (the binary path is set with `OPENCODE_BIN`; it must be able to push to the
-repository of the failing workflow).
-
-### Installing OpenCode via curl
-
-OpenCode is commonly installed with `curl` and is **not** on `PATH` by default
-(e.g. it lands in `/root/.opencode/bin/opencode`). The daemon will not find it
-unless you point `OPENCODE_BIN` at the binary:
-
-```bash
-# install OpenCode (curl) — note where it lands
-curl -fsSL https://opencode.ai/install | sh
-# /root/.opencode/bin/opencode  (or similar, depending on the installer)
-
-# tell the daemon where to find it
-export OPENCODE_BIN=/root/.opencode/bin/opencode
-```
-
-If `OPENCODE_BIN` is unset, the daemon falls back to `opencode` on `PATH` and the
-fix runner will fail with "executable not found" on the first chain.
+repository of the failing workflow). See [Precheck: OpenCode via curl](#precheck-opencode-via-curl)
+above — if `OPENCODE_BIN` is unset, the fix runner will fail on the first chain.
 
 ## Configuration
 
