@@ -32,6 +32,29 @@ Two runnable entry points:
 - **MCP server**: `python -m gh_workflow_fix.mcp` — stdio MCP server with the chain
   control tools.
 
+## Why the daemon is required
+
+The MCP server alone is **stateless** — it reads `state.db` but never writes to it.
+Without the daemon running on the same machine:
+
+- `list_chains` returns `[]` and `get_chain` returns `404` — there is no data.
+- `health` returns `{"ok": true}` but with `"latest_event": null` and `"chains": {}`.
+- `retry_now`, `pause_chain`, `resume_chain` and `create_issue_now` have nothing to act on.
+
+The daemon is what **creates** the data: it receives `workflow_run` webhooks from
+GitHub, runs OpenCode on worktrees to produce fixes, pushes them, re-runs the
+workflow, and records every chain, retry and event in `state.db`. The MCP server
+is only a **control surface** over that data.
+
+**The daemon must run on a machine that can:**
+- receive inbound HTTPS webhooks from GitHub (port `18080` must be reachable),
+- clone and **push** to the monitored repository (needs git credentials with write access),
+- run the `opencode` binary (set via `OPENCODE_BIN`),
+- keep `DATA_DIR` persistent across restarts (chains and retry state live there).
+
+A stateless container (e.g. a remote MCP host with its own fresh database) exposes
+a valid but empty tool surface — it cannot fix anything by itself.
+
 ## Installation
 
 ```bash
@@ -103,6 +126,31 @@ python -m gh_workflow_fix
 The daemon exposes `POST /webhook/github` (HMAC verified) and `GET /healthz`
 (`{"ok": true, "db": ..., "tick": ...}`).
 
+## Running on your own server (step by step)
+
+1. **Install** (Python >= 3.11, OpenCode binary on `PATH` or set `OPENCODE_BIN`):
+   ```bash
+   pip install gh-workflow-fix-mcp
+   ```
+2. **Create a `.env`** with the four required variables (see [Configuration](#configuration)).
+3. **Start the daemon** (same machine as the MCP server):
+   ```bash
+   export GH_TOKEN=... GH_REPO=owner/repo GH_OC_AUTO=true WEBHOOK_SECRET=...
+   python -m gh_workflow_fix
+   ```
+4. **Configure the GitHub webhook** — [Webhook setup (GitHub)](#webhook-setup-github).
+   Make sure the Payload URL is reachable from the internet and stays stable.
+5. **Start the MCP server** (shares the daemon's environment and `DATA_DIR`):
+   ```bash
+   python -m gh_workflow_fix.mcp
+   ```
+6. **Connect your MCP client** — [MCP client setup](#mcp-client-setup).
+
+After a failing run of an opt-in workflow, the daemon creates a chain and the MCP
+tools become useful: `list_chains` shows it, `retry_now` / `pause_chain` /
+`resume_chain` control it, and `create_issue_now` opens a GitHub issue when the
+retry budget is exhausted.
+
 ## MCP client setup
 
 Add to your MCP configuration, e.g. for OpenCode (`opencode.json`):
@@ -121,6 +169,11 @@ Add to your MCP configuration, e.g. for OpenCode (`opencode.json`):
 
 The MCP server reads the same environment as the daemon. Run it locally on the same
 machine as the daemon (they share `DATA_DIR`/`state.db`).
+
+> **Note:** a remote/stateless MCP host (e.g. a hosted MCP registry with its own
+> fresh database) will answer `initialize`, `tools/list` and `health`, but its
+> `list_chains` will be empty and its mutating tools will have nothing to act on.
+> Use the local configuration above if you want to manage real chains.
 
 ### MCP tools
 
