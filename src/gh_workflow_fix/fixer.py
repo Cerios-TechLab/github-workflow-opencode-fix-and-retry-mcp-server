@@ -1,4 +1,4 @@
-"""Orkestreert één fix-poging: lock, runner, resultaat, chain-update."""
+"""Orchestrates one fix attempt: lock, runner, result, chain update."""
 from __future__ import annotations
 
 from gh_workflow_fix.models import Chain, ChainState, Retry, utcnow_iso
@@ -39,10 +39,10 @@ class Fixer:
             if not self.github.rerun_failed_jobs(chain.run_id):
                 self._finish_retry(chain, "rerun_failed", res.notes)
                 chain.state = ChainState.FIX_ERROR.value
-                chain.last_error = "rerun_failed_jobs niet geaccepteerd"
+                chain.last_error = "rerun_failed_jobs not accepted"
                 self._commit(chain)
                 return
-            self._finish_retry(chain, "fix_ok_no_change", "")  # geen push; rerun gezet
+            self._finish_retry(chain, "fix_ok_no_change", "")  # no push; rerun set
         else:
             self._finish_retry(chain, "fix_ok", res.notes)
         chain.state = ChainState.WAITING.value

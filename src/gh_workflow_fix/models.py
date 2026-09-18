@@ -1,4 +1,4 @@
-"""Staatmodellen voor de fix-and-retry ketens."""
+"""State models for the fix-and-retry chains."""
 from __future__ import annotations
 
 import enum
@@ -11,9 +11,9 @@ def utcnow_iso() -> str:
 
 
 class ChainState(str, enum.Enum):
-    RUNNING = "running"      # gepland of fix wordt uitgevoerd
-    WAITING = "waiting"      # fix gepusht/rerun; wacht op volgend run-event
-    FIX_ERROR = "fix_error"  # fix-runner faalde; volgende retry gepland
+    RUNNING = "running"      # scheduled or fix in progress
+    WAITING = "waiting"      # fix pushed/rerun; waiting for next run event
+    FIX_ERROR = "fix_error"  # fix runner failed; next retry scheduled
     PAUSED = "paused"
     DONE = "done"
     EXHAUSTED = "exhausted"

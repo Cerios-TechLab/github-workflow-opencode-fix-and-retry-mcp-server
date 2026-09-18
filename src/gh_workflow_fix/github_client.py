@@ -1,4 +1,4 @@
-"""Async GitHub REST-client voor workflow-content, issues en rerun."""
+"""Async GitHub REST client for workflow content, issues and rerun."""
 from __future__ import annotations
 
 import base64

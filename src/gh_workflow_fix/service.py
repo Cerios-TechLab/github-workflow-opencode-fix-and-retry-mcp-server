@@ -1,4 +1,4 @@
-"""Kern-businesslogica: webhook-afhandeling, planning en issues."""
+"""Core business logic: webhook handling, scheduling and issues."""
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +9,7 @@ from gh_workflow_fix.models import Chain, ChainState, Event, utcnow_iso
 
 
 def _add_minutes(iso: str, minutes: int) -> str:
-    """ISO-timestamp + `minutes` minuten, zelfde formaat als `utcnow_iso()`."""
+    """ISO timestamp plus `minutes` minutes, same format as `utcnow_iso()`."""
     return (datetime.fromisoformat(iso) + timedelta(minutes=minutes)).isoformat(
         timespec="seconds"
     )
@@ -22,7 +22,7 @@ class Service:
         self.fixer = fixer
         self.cfg = cfg
 
-    # -- effectieve config (DB-override wint van env) -------------------------
+    # -- effective config (DB override wins over env) ---------------------
     def effective_retry_delays(self) -> tuple[int, ...]:
         raw = self.db.get_override("retry_delays_min")
         if raw:
@@ -43,7 +43,7 @@ class Service:
     def _delay_before(self, attempt: int) -> int:
         return self.effective_retry_delays()[attempt - 1]
 
-    # -- webhook --------------------------------------------------------------
+    # -- webhook -----------------------------------------------------------
     async def handle_webhook(self, event: Event, repo: str | None = None) -> str:
         if repo is not None and repo != self.cfg.gh_repo:
             return "ignored_repo"
@@ -114,7 +114,7 @@ class Service:
         self.db.insert_event(event)
         return event.handled
 
-    # -- scheduler ------------------------------------------------------------
+    # -- scheduler ---------------------------------------------------------
     async def tick(self) -> None:
         for chain in self.db.due_chains(utcnow_iso()):
             sha = await self.github.latest_sha(chain.head_branch)
@@ -141,7 +141,7 @@ class Service:
             chain.last_error = None
         self.db.update_chain(chain)
 
-    # -- issues ---------------------------------------------------------------
+    # -- issues ------------------------------------------------------------
     async def _maybe_create_issue(self, chain: Chain) -> None:
         title = self._issue_title(chain)
         existing = await self.github.find_issue(title)
@@ -160,9 +160,9 @@ class Service:
 
     def _issue_body(self, chain: Chain) -> str:
         return (
-            f"Workflow `{chain.workflow_path}` faalt op branch "
+            f"Workflow `{chain.workflow_path}` fails on branch "
             f"`{chain.head_branch}` in repo `{chain.repo}`.\n\n"
-            f"- poging: {chain.attempt}\n"
-            f"- laatste fout: {chain.last_error or '-'}\n\n"
-            f"Fixed? Push en re-run de workflow; anders opnieuw toewijzen."
+            f"- attempt: {chain.attempt}\n"
+            f"- last error: {chain.last_error or '-'}\n\n"
+            f"Fixed? Push and re-run the workflow; otherwise re-assign."
         )

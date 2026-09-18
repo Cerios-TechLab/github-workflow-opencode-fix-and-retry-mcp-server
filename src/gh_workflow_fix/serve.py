@@ -1,4 +1,4 @@
-"""Starlette daemon: webhook-endpoint, HMAC-verificatie, scheduler-tick-loop."""
+"""Starlette daemon: webhook endpoint, HMAC verification, scheduler tick loop."""
 from __future__ import annotations
 
 import asyncio
@@ -39,7 +39,7 @@ async def tick_loop(
         try:
             await service.tick()
         except Exception:
-            log.exception("tick-loop fout — draait door")
+            log.exception("tick loop error — continuing")
         await asyncio.sleep(interval_s)
 
 

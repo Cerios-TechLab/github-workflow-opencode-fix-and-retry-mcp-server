@@ -1,4 +1,4 @@
-"""FastMCP stdio-server voor keten-controle en health-tools."""
+"""FastMCP stdio server for chain control and health tools."""
 from __future__ import annotations
 
 from collections import Counter
@@ -143,7 +143,7 @@ def create_mcp(db: Database, cfg: Config) -> FastMCP:
 
 
 def main() -> None:
-    """Start de MCP-server over stdio (``python -m gh_workflow_fix.mcp``)."""
+    """Start the MCP server over stdio (``python -m gh_workflow_fix.mcp``)."""
     cfg = load_config()
     db = Database(cfg.data_dir / "state.db")
     mcp = create_mcp(db=db, cfg=cfg)

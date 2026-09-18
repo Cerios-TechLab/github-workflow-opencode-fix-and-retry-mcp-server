@@ -1,4 +1,4 @@
-"""Configuratie uit omgevingsvariabelen."""
+"""Configuration from environment variables."""
 from __future__ import annotations
 
 import os
@@ -18,7 +18,7 @@ class Config:
     self_heal_marker: str = DEFAULT_MARKER
     retry_delays_min: tuple[int, ...] = DEFAULT_DELAYS
     data_dir: Path = field(default_factory=lambda: Path("/var/lib/gh-workflow-fix"))
-    opencode_bin: Path = field(default_factory=lambda: Path("/root/.opencode/bin/opencode"))
+    opencode_bin: Path = field(default_factory=lambda: Path("opencode"))
     gh_api_base: str = "https://api.github.com"
     webhook_host: str = "0.0.0.0"
     webhook_port: int = 18080
@@ -27,7 +27,7 @@ class Config:
     opencode_model: str | None = None
 
     def delay_before(self, attempt: int) -> int:
-        """Wachttijd in minuten vóór poging `attempt` (1-based)."""
+        """Delay in minutes before attempt `attempt` (1-based)."""
         return self.retry_delays_min[attempt - 1]
 
 
@@ -45,14 +45,14 @@ def load_config(env=None) -> Config:
     def req(name: str) -> str:
         value = env.get(name)
         if not value:
-            raise ValueError(f"Ontbrekende env-var {name}")
+            raise ValueError(f"Missing required env var: {name}")
         return value
 
     delays = DEFAULT_DELAYS
     if "RETRY_DELAYS_MIN" in env and env["RETRY_DELAYS_MIN"].strip():
         delays = _delays(env["RETRY_DELAYS_MIN"])
         if len(delays) < 1:
-            raise ValueError("RETRY_DELAYS_MIN moet minimaal 1 waarde bevatten")
+            raise ValueError("RETRY_DELAYS_MIN must contain at least one value")
 
     return Config(
         gh_token=req("GH_TOKEN"),
@@ -62,7 +62,7 @@ def load_config(env=None) -> Config:
         self_heal_marker=env.get("SELF_HEAL_MARKER", DEFAULT_MARKER),
         retry_delays_min=delays,
         data_dir=Path(env.get("DATA_DIR", "/var/lib/gh-workflow-fix")),
-        opencode_bin=Path(env.get("OPENCODE_BIN", "/root/.opencode/bin/opencode")),
+        opencode_bin=Path(env.get("OPENCODE_BIN", "opencode")),
         gh_api_base=env.get("GH_API_BASE", "https://api.github.com"),
         webhook_host=env.get("WEBHOOK_HOST", "0.0.0.0"),
         webhook_port=int(env.get("WEBHOOK_PORT", "18080")),

@@ -1,4 +1,4 @@
-"""SQLite-persistentie: ketens, retries, events, overrides en fix-slot."""
+"""SQLite persistence: chains, retries, events, overrides and the fix lock."""
 from __future__ import annotations
 
 import sqlite3
@@ -199,7 +199,7 @@ class Database:
     def all_overrides(self) -> dict[str, str]:
         return {r["key"]: r["value"] for r in self._conn.execute("SELECT * FROM overrides")}
 
-    # -- globale fix-slot (één actieve fix tegelijk) ------------------------
+    # -- global fix slot (one active fix at a time) --------------------------
     def acquire_fix_lock(self, chain_id: int) -> bool:
         row = self._conn.execute("SELECT value FROM settings WHERE key = 'active_fix'").fetchone()
         if row and row["value"] != str(chain_id):

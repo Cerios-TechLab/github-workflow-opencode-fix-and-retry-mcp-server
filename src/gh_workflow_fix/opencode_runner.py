@@ -1,4 +1,4 @@
-"""Lokale opencode fix-sessie: clone, briefing, run, sha-vergelijking."""
+"""Local opencode fix session: clone, briefing, run, sha comparison."""
 from __future__ import annotations
 
 import os
@@ -17,7 +17,7 @@ class FixResult:
 
 
 class CmdResult(tuple):
-    """Tuple-variant om subprocess-achtige resultaten te modelleren (testbaar)."""
+    """Tuple variant to model subprocess-like results (testable)."""
 
     def __new__(cls, returncode: int, stdout: str):
         return tuple.__new__(cls, (returncode, stdout))
@@ -49,7 +49,7 @@ class OpenCodeRunner:
                               text=True, timeout=timeout, check=False)
         return CmdResult(proc.returncode, proc.stdout.strip())
 
-    # -- conversatie ---------------------------------------------------------
+    # -- conversation ------------------------------------------------------
     def run_fix(self, *, chain_id: int, attempt: int, repo: str, branch: str,
                 workflow_path: str, marker: str, sha: str) -> FixResult:
         wd = self.cfg.data_dir / "worktrees" / f"fix-{chain_id}-{attempt}"
@@ -65,9 +65,9 @@ class OpenCodeRunner:
                 return FixResult(sha_before=sha, sha_after=None, exit_code=res.returncode,
                                  notes=f"git {' '.join(args)} exit {res.returncode}", ok=False)
         (wd / "briefing.md").write_text(
-            f"# Fix-opdracht\n\nRepareer de failing GitHub Actions workflow:\n"
-            f"- bestand: {workflow_path}\n- branch: {branch}\n- sha: {sha}\n"
-            f"- status-marker: {marker}\n\nPus de fix naar dezelfde branch.\n"
+            f"# Fix task\n\nRepair the failing GitHub Actions workflow:\n"
+            f"- file: {workflow_path}\n- branch: {branch}\n- sha: {sha}\n"
+            f"- status marker: {marker}\n\nPush the fix to the same branch.\n"
         )
         try:
             args = [
