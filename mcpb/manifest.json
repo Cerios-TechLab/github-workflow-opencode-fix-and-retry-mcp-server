@@ -1,0 +1,39 @@
+{
+  "manifest_version": "0.4",
+  "name": "github-workflow-opencode-fix-and-retry-mcp-server",
+  "display_name": "GitHub Workflow Fix-and-Retry MCP Server",
+  "version": "0.1.0",
+  "description": "Monitor failing GitHub Actions workflows, auto-fix them with OpenCode, and retry the run — driven by a workflow_run webhook, coordinated through an MCP server.",
+  "long_description": "When a workflow that opts in via a `# self-heal: true` marker in its YAML fails, a fix-and-retry chain is started: wait for the configured retry delays, run OpenCode on a worktree of the failing branch to produce a fix, push it, re-run the workflow, and on repeated failure open a GitHub issue. The MCP server surfaces the chains (list_chains, get_chain, pause_chain, resume_chain, retry_now, create_issue_now, set_config, health) to any MCP client.",
+  "author": {
+    "name": "Cerios TechLab",
+    "url": "https://github.com/Cerios-TechLab"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Cerios-TechLab/github-workflow-opencode-fix-and-retry-mcp-server.git"
+  },
+  "homepage": "https://github.com/Cerios-TechLab/github-workflow-opencode-fix-and-retry-mcp-server",
+  "support": "https://github.com/Cerios-TechLab/github-workflow-opencode-fix-and-retry-mcp-server/issues",
+  "server": {
+    "type": "python",
+    "entry_point": "server/server.py",
+    "mcp_config": {
+      "command": "python",
+      "args": ["server/server.py"],
+      "env": {
+        "PYTHONPATH": "${__dirname}"
+      }
+    }
+  },
+  "tools": [
+    {"name": "list_chains", "description": "List fix-and-retry chains, optionally filtered by state."},
+    {"name": "get_chain", "description": "Get a single chain by ID, or error if not found."},
+    {"name": "retry_now", "description": "Schedule a chain for immediate retry."},
+    {"name": "pause_chain", "description": "Pause a chain (only if running, waiting, or fix_error)."},
+    {"name": "resume_chain", "description": "Resume a paused chain."},
+    {"name": "create_issue_now", "description": "Create a GitHub issue for a chain (requires GitHub client)."},
+    {"name": "set_config", "description": "Set a configuration override (gh_oc_auto or retry_delays_min)."},
+    {"name": "health", "description": "Health check with DB status and chain counts."}
+  ]
+}

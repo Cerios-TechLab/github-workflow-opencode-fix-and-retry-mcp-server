@@ -1,0 +1,30 @@
+name: github-workflow-opencode-fix-and-retry-mcp-server
+displayName: GitHub Workflow Fix-and-Retry MCP Server
+description: Monitor failing GitHub Actions workflows, auto-fix them with OpenCode, and retry the run.
+version: "0.1.0"
+author: Cerios TechLab
+homepage: https://github.com/Cerios-TechLab/github-workflow-opencode-fix-and-retry-mcp-server
+license: MIT
+categories:
+  - developer-tools
+  - devops
+  - testing
+tags:
+  - github
+  - workflow
+  - fix
+  - retry
+  - mcp
+  - opencode
+runtime: python
+startCommand:
+  type: stdio
+  command:
+    - python
+    - -m
+    - gh_workflow_fix.mcp
+  env: {}
+configSchema:
+  type: object
+  additionalProperties: true
+  properties: {}

@@ -1,0 +1,19 @@
+# Exclude these paths from the MCPB bundle
+.git
+.github
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.mcpbignore
+README.md
+Dockerfile
+smithery.yaml
+server-card.json
+scripts
+tests
+docs
+deploy
+LICENSE
+uv.lock
+config.example.yaml

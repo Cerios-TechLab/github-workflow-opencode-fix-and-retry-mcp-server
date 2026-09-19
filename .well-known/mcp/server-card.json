@@ -1,0 +1,125 @@
+{
+  "name": "github-workflow-opencode-fix-and-retry-mcp-server",
+  "version": "0.1.0",
+  "displayName": "GitHub Workflow Fix-and-Retry MCP Server",
+  "description": "Monitor failing GitHub Actions workflows, auto-fix them with OpenCode, and retry the run — driven by a workflow_run webhook, coordinated through an MCP server.",
+  "tools": [
+    {
+      "name": "list_chains",
+      "description": "List fix-and-retry chains, optionally filtered by state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": ["string", "null"],
+            "description": "Optional chain state filter (running, waiting, fix_error, paused, done, exhausted)."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_chain",
+      "description": "Get a single chain by ID, or error if not found.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chain_id": {
+            "type": "integer",
+            "description": "ID of the chain to fetch."
+          }
+        },
+        "required": ["chain_id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "retry_now",
+      "description": "Schedule a chain for immediate retry.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chain_id": {
+            "type": "integer",
+            "description": "ID of the chain to retry."
+          }
+        },
+        "required": ["chain_id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "pause_chain",
+      "description": "Pause a chain (only if running, waiting, or fix_error).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chain_id": {
+            "type": "integer",
+            "description": "ID of the chain to pause."
+          }
+        },
+        "required": ["chain_id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "resume_chain",
+      "description": "Resume a paused chain.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chain_id": {
+            "type": "integer",
+            "description": "ID of the chain to resume."
+          }
+        },
+        "required": ["chain_id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "create_issue_now",
+      "description": "Create a GitHub issue for a chain (requires GitHub client).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chain_id": {
+            "type": "integer",
+            "description": "ID of the chain to open an issue for."
+          }
+        },
+        "required": ["chain_id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_config",
+      "description": "Set a configuration override (gh_oc_auto or retry_delays_min).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Config key to override (gh_oc_auto or retry_delays_min)."
+          },
+          "value": {
+            "type": "string",
+            "description": "Value: for gh_oc_auto a boolean-like string (true/false/0/1); for retry_delays_min a comma-separated list of minutes."
+          }
+        },
+        "required": ["key", "value"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "health",
+      "description": "Health check with DB status and chain counts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  ]
+}
