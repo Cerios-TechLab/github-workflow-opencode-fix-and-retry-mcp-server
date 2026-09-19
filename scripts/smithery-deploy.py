@@ -173,7 +173,7 @@ def deploy_release(api_key: str, qualified_name: str, bundle_path: Path, payload
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("-n", "--name", default="Cerios-TechLab/github-workflow-opencode-fix-and-retry-mcp-server")
+    parser.add_argument("-n", "--name", default="djsteavy/github-workflow-opencode-fix-and-retry-mcp-server")
     parser.add_argument("-b", "--bundle", default="dist/server.mcpb")
     args = parser.parse_args()
 

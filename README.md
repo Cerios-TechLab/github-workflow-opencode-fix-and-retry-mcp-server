@@ -1,6 +1,6 @@
 # GitHub Workflow Fix-and-Retry MCP Server
 
-[![smithery](https://img.shields.io/badge/smithery%20server-blue)](https://github.com/Cerios-TechLab/github-workflow-opencode-fix-and-retry-mcp-server)
+[![smithery](https://img.shields.io/badge/smithery%20server-blue)](https://smithery.ai/servers/djsteavy/github-workflow-opencode-fix-and-retry-mcp-server)
 
 Monitor failing GitHub Actions workflows, auto-fix them with [OpenCode](https://opencode.ai),
 and retry the run — driven by a `workflow_run` webhook, coordinated through an MCP server.
