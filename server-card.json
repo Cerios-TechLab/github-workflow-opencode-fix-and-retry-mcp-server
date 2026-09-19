@@ -1,6 +1,6 @@
 {
   "name": "github-workflow-opencode-fix-and-retry-mcp-server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "displayName": "GitHub Workflow Fix-and-Retry MCP Server",
   "description": "Monitor failing GitHub Actions workflows, auto-fix them with OpenCode, and retry the run — driven by a workflow_run webhook, coordinated through an MCP server.",
   "tools": [

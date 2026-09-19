@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "github-workflow-opencode-fix-and-retry-mcp-server",
   "display_name": "GitHub Workflow Fix-and-Retry MCP Server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Monitor failing GitHub Actions workflows, auto-fix them with OpenCode, and retry the run — driven by a workflow_run webhook, coordinated through an MCP server.",
   "long_description": "When a workflow that opts in via a `# self-heal: true` marker in its YAML fails, a fix-and-retry chain is started: wait for the configured retry delays, run OpenCode on a worktree of the failing branch to produce a fix, push it, re-run the workflow, and on repeated failure open a GitHub issue. The MCP server surfaces the chains (list_chains, get_chain, pause_chain, resume_chain, retry_now, create_issue_now, set_config, health) to any MCP client.",
   "author": {
